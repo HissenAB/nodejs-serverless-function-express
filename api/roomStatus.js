@@ -1,6 +1,6 @@
 // api/roomStatus.js
 import fetch from 'node-fetch';
-import { DateTime } from 'luxon'; // Vi använder luxon för korrekt tidszonshantering
+import { DateTime } from 'luxon'; // För tidszonshantering
 
 export default async function handler(req, res) {
   // Tillåt alla origins
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
     const roomEmail = 'motesrumtest@hissen.se';
 
-    // Hämta access token
+    // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -30,21 +30,60 @@ export default async function handler(req, res) {
 
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
-
     const accessToken = tokenData.access_token;
 
-    const now = new Date().toISOString();
-    const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    // ----- Hämta möten för idag och imorgon -----
+    const today = DateTime.now().setZone('Europe/Stockholm').startOf('day');
+    const tomorrow = today.plus({ days: 1 }).endOf('day');
+    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${today.toISO()}&enddatetime=${tomorrow.toISO()}&$orderby=start/dateTime`;
 
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=5`;
-    const graphRes = await fetch(graphUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-
+    const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphRes.json();
+    const meetings = (graphData.value || []);
 
-    const meetings = (graphData.value || []).map(m => {
-      // Konvertera till Europe/Stockholm med luxon
+    // ----- Funktion för att acceptera möte -----
+    async function acceptMeeting(eventId) {
+      const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/events/${eventId}/accept`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sendResponse: true })
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        console.error(`Kunde inte acceptera mötet (${eventId}):`, err);
+      } else {
+        console.log(`✅ Accepterade möte: ${eventId}`);
+      }
+    }
+
+    // ----- Kolla möten och acceptera om ledigt -----
+    const acceptedMeetings = meetings.filter(m => m.responseStatus?.response === "accepted");
+
+    for (const m of meetings) {
+      if (m.responseStatus?.response === "accepted") continue; // redan accepterat
+
+      const start = DateTime.fromISO(m.start.dateTime);
+      const end = DateTime.fromISO(m.end.dateTime);
+
+      // Kontrollera konflikter
+      const conflict = acceptedMeetings.some(other =>
+        DateTime.fromISO(other.start.dateTime) < end &&
+        DateTime.fromISO(other.end.dateTime) > start
+      );
+
+      if (!conflict) {
+        await acceptMeeting(m.id);
+        acceptedMeetings.push(m);
+      }
+    }
+
+    // ----- Returnera möten i samma format som tidigare -----
+    const formattedMeetings = meetings.map(m => {
       const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
       const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
 
@@ -57,7 +96,7 @@ export default async function handler(req, res) {
       };
     });
 
-    res.status(200).json({ meetings });
+    res.status(200).json({ meetings: formattedMeetings });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error', details: err.message });
