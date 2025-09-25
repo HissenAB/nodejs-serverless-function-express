@@ -34,16 +34,19 @@ export default async function handler(req, res) {
     }
     const accessToken = tokenData.access_token;
 
-    // 2️⃣ Hämta senaste mejlen (mötesinbjudningar) i inbox
-    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/mailFolders/Inbox/messages?$top=50&$filter=meetingMessageType eq 'meetingRequest'`, {
+    // 2️⃣ Hämta senaste 50 mejlen från inboxen
+    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/mailFolders/Inbox/messages?$top=50`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     const mailData = await mailRes.json();
     const messages = mailData.value || [];
-    console.log(`Hämtade ${messages.length} mötesinbjudningar från inboxen`);
 
-    // 3️⃣ Acceptera varje möte direkt via messageId
-    for (const msg of messages) {
+    // 3️⃣ Filtrera mötesinbjudningar i JavaScript
+    const meetingRequests = messages.filter(m => m.meetingMessageType === 'meetingRequest');
+    console.log(`Hämtade ${meetingRequests.length} mötesinbjudningar från inboxen`);
+
+    // 4️⃣ Acceptera varje möte direkt via messageId
+    for (const msg of meetingRequests) {
       try {
         console.log(`Accepterar möte: ${msg.subject}`);
         const acceptRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/messages/${msg.id}/accept`, {
@@ -66,7 +69,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 4️⃣ Hämta alla möten som är idag eller imorgon och inte passerade
+    // 5️⃣ Hämta kalendern för idag och imorgon
     const now = DateTime.now().setZone('Europe/Stockholm');
     const todayStartUTC = now.startOf('day').toUTC().toISO();
     const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
@@ -77,11 +80,13 @@ export default async function handler(req, res) {
     const calendarData = await calendarRes.json();
     const meetings = calendarData.value || [];
 
+    // 6️⃣ Filtrera bort möten som redan passerat
     const upcomingMeetings = meetings.filter(m => {
       const endLocal = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
       return endLocal >= now;
     });
 
+    // 7️⃣ Formatera möten
     const formattedMeetings = upcomingMeetings.map(m => ({
       subject: m.subject,
       start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm').toISO() },
