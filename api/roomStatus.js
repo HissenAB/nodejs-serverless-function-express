@@ -1,5 +1,6 @@
 // api/roomStatus.js
 import fetch from 'node-fetch';
+import { DateTime } from 'luxon'; // Vi använder luxon för korrekt tidszonshantering
 
 export default async function handler(req, res) {
   // Tillåt alla origins
@@ -41,13 +42,20 @@ export default async function handler(req, res) {
     });
 
     const graphData = await graphRes.json();
-    const meetings = (graphData.value || []).map(m => ({
-      subject: m.subject,
-      start: m.start,
-      end: m.end,
-      attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
-      isOnlineMeeting: m.isOnlineMeeting,
-    }));
+
+    const meetings = (graphData.value || []).map(m => {
+      // Konvertera till Europe/Stockholm med luxon
+      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
+      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
+
+      return {
+        subject: m.subject,
+        start: { dateTime: startLocal },
+        end: { dateTime: endLocal },
+        attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum Test'),
+        isOnlineMeeting: m.isOnlineMeeting,
+      };
+    });
 
     res.status(200).json({ meetings });
   } catch (err) {
