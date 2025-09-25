@@ -1,7 +1,9 @@
+// api/roomStatus.js
 import fetch from 'node-fetch';
-import { DateTime } from 'luxon';
+import { DateTime } from 'luxon'; // För tidszonshantering
 
 export default async function handler(req, res) {
+  // Tillåt alla origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -12,7 +14,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'motesrumtest@hissen.se';
+    const roomEmail = 'motesrumtest@hissen.se'; // Kontrollera att detta är rätt
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -30,32 +32,69 @@ export default async function handler(req, res) {
     if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
     const accessToken = tokenData.access_token;
 
-    // ----- Hämta interval (idag → imorgon slut) -----
+    // ----- Hämta möten för idag + imorgon -----
     const todayStart = DateTime.now().setZone('Europe/Stockholm').startOf('day').toUTC().toISO();
     const tomorrowEnd = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    const graphUrl =
-      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStart}&enddatetime=${tomorrowEnd}&$orderby=start/dateTime`;
-
+    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStart}&enddatetime=${tomorrowEnd}&$orderby=start/dateTime`;
     const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphRes.json();
 
+    if (!graphRes.ok) {
+      return res.status(500).json({ error: 'Graph error', details: graphData });
+    }
+
     const meetings = graphData.value || [];
 
-    // ----- Filtrera möten i lokalt datum -----
-    const today = DateTime.now().setZone('Europe/Stockholm').toFormat('yyyy-MM-dd');
-    const tomorrow = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).toFormat('yyyy-MM-dd');
+    // ----- Funktion för att acceptera möte -----
+    async function acceptMeeting(eventId) {
+      const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/events/${eventId}/accept`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sendResponse: true })
+      });
 
-    const todaysMeetings = meetings.filter(m =>
-      DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toFormat('yyyy-MM-dd') === today
-    );
+      if (!resp.ok) {
+        const err = await resp.text();
+        console.error(`Kunde inte acceptera mötet (${eventId}):`, err);
+      } else {
+        console.log(`✅ Accepterade möte: ${eventId}`);
+      }
+    }
 
-    const tomorrowsMeetings = meetings.filter(m =>
-      DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toFormat('yyyy-MM-dd') === tomorrow
-    );
+    // ----- Acceptera möten som är lediga -----
+    const acceptedMeetings = meetings.filter(m => m.responseStatus?.response === "accepted");
+
+    for (const m of meetings) {
+      if (m.responseStatus?.response === "accepted") continue;
+
+      const start = DateTime.fromISO(m.start.dateTime);
+      const end = DateTime.fromISO(m.end.dateTime);
+
+      const conflict = acceptedMeetings.some(other =>
+        DateTime.fromISO(other.start.dateTime) < end &&
+        DateTime.fromISO(other.end.dateTime) > start
+      );
+
+      if (!conflict) {
+        await acceptMeeting(m.id);
+        acceptedMeetings.push(m);
+      }
+    }
+
+    // ----- Filtrera bort möten som redan är passerade idag -----
+    const now = DateTime.now().setZone('Europe/Stockholm');
+    const upcomingMeetings = meetings.filter(m => {
+      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm');
+      return endLocal >= now;
+    });
 
     // ----- Formatera möten -----
-    const formatMeetings = mList => mList.map(m => {
+    const formattedMeetings = upcomingMeetings.map(m => {
       const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
       const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
 
@@ -68,10 +107,7 @@ export default async function handler(req, res) {
       };
     });
 
-    res.status(200).json({
-      today: formatMeetings(todaysMeetings),
-      tomorrow: formatMeetings(tomorrowsMeetings)
-    });
+    res.status(200).json({ meetings: formattedMeetings });
 
   } catch (err) {
     console.error(err);
