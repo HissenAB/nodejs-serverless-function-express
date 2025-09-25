@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'motesrumtest@hissen.se';
+    const roomEmail = 'vastberga.mote@hissen.se'; // <-- ändrat här
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -29,7 +29,10 @@ export default async function handler(req, res) {
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
+    if (!tokenData.access_token) {
+      console.error('Failed to get token:', tokenData);
+      return res.status(500).json({ error: 'Failed to get token', details: tokenData });
+    }
     const accessToken = tokenData.access_token;
 
     // ----- Hämta möten för idag + imorgon -----
@@ -41,10 +44,12 @@ export default async function handler(req, res) {
     const graphData = await graphRes.json();
 
     if (!graphRes.ok) {
+      console.error('Graph API error:', graphData);
       return res.status(500).json({ error: 'Graph error', details: graphData });
     }
 
     const meetings = graphData.value || [];
+    console.log(`Hämtade ${meetings.length} möten från kalendern`);
 
     // ----- Funktion för att acceptera möte -----
     async function acceptMeeting(eventId) {
@@ -60,7 +65,7 @@ export default async function handler(req, res) {
 
       if (!resp.ok) {
         const err = await resp.text();
-        console.error(`Kunde inte acceptera mötet (${eventId}):`, err);
+        console.error(`❌ Kunde inte acceptera mötet (${eventId}):`, err);
       } else {
         console.log(`✅ Accepterade möte: ${eventId}`);
       }
@@ -81,6 +86,7 @@ export default async function handler(req, res) {
       );
 
       if (!conflict) {
+        console.log(`Försöker acceptera möte: ${m.subject} (${m.id})`);
         await acceptMeeting(m.id);
         acceptedMeetings.push(m);
       }
@@ -110,7 +116,7 @@ export default async function handler(req, res) {
     res.status(200).json({ meetings: formattedMeetings });
 
   } catch (err) {
-    console.error(err);
+    console.error('Server error:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 }
