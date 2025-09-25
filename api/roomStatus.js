@@ -1,6 +1,6 @@
 // api/roomStatus.js
 import fetch from 'node-fetch';
-import { DateTime } from 'luxon'; // För tidszonshantering
+import { DateTime } from 'luxon';
 
 export default async function handler(req, res) {
   // Tillåt alla origins
@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'motesrumtest@hissen.se'; // Kontrollera att detta är rätt
+    const roomEmail = 'motesrumtest@hissen.se';
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ----- Acceptera möten som är lediga -----
+    // ----- Acceptera alla möten som inte redan accepterats och inte krockar -----
     const acceptedMeetings = meetings.filter(m => m.responseStatus?.response === "accepted");
 
     for (const m of meetings) {
@@ -86,7 +86,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ----- Filtrera bort möten som redan är passerade idag -----
+    // ----- Filtrera bort möten som redan passerat idag -----
     const now = DateTime.now().setZone('Europe/Stockholm');
     const upcomingMeetings = meetings.filter(m => {
       const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm');
