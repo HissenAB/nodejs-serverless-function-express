@@ -7,11 +7,11 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Hantera preflight request
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
   try {
-    console.log('👉 Börjar köra roomStatus...');
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
@@ -28,30 +28,35 @@ export default async function handler(req, res) {
         grant_type: 'client_credentials'
       })
     });
-
     const tokenData = await tokenResponse.json();
-    if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get access token', details: tokenData });
-
+    if (!tokenData.access_token) {
+      return res.status(500).json({ error: 'Failed to get access token', details: tokenData });
+    }
     const accessToken = tokenData.access_token;
 
-    // Hämta nästa möte
     const now = new Date().toISOString();
-    const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=1`;
+    const end = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString();
 
+    // Hämta upp till 10 kommande möten
+    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=10`;
     const graphResponse = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphResponse.json();
-    let nextMeeting = graphData.value && graphData.value.length > 0 ? graphData.value[0] : null;
+    const meetings = graphData.value || [];
 
-    if (nextMeeting) {
-      // Filtrera bort Mötesrum Test via name
-      nextMeeting.attendees = (nextMeeting.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test');
+    // Pågående möte
+    const currentMeeting = meetings.find(m => new Date(m.start.dateTime) <= new Date() && new Date() <= new Date(m.end.dateTime));
 
-      // Ta bort onlineMeeting så knappen inte visas
-      if (nextMeeting.onlineMeeting) delete nextMeeting.onlineMeeting;
-    }
+    // Nästa möte (börjar efter nu)
+    const nextMeeting = meetings.find(m => new Date(m.start.dateTime) > new Date());
 
-    res.status(200).json({ nextMeeting });
+    // Filtrera bort "Mötesrum test" som deltagare
+    const filterAttendees = m => {
+      if (!m) return [];
+      return (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test');
+    };
+
+    res.status(200).json({ currentMeeting: currentMeeting ? { ...currentMeeting, attendees: filterAttendees(currentMeeting) } : null,
+                            nextMeeting: nextMeeting ? { ...nextMeeting, attendees: filterAttendees(nextMeeting) } : null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error', details: err.message });
