@@ -35,27 +35,18 @@ export default async function handler(req, res) {
     const accessToken = tokenData.access_token;
 
     // 2️⃣ Hämta senaste mejlen (mötesinbjudningar) i inbox
-    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/mailFolders/Inbox/messages?$top=50`, {
+    const mailRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/mailFolders/Inbox/messages?$top=50&$filter=meetingMessageType eq 'meetingRequest'`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     const mailData = await mailRes.json();
     const messages = mailData.value || [];
-    console.log(`Hämtade ${messages.length} mejl från inboxen`);
+    console.log(`Hämtade ${messages.length} mötesinbjudningar från inboxen`);
 
-    // 3️⃣ Filtrera mötesinbjudningar
-    const meetingRequests = messages.filter(m => m.meetingMessageType === 'meetingRequest');
-
-    // 4️⃣ Acceptera varje möte
-    for (const msg of meetingRequests) {
+    // 3️⃣ Acceptera varje möte direkt via messageId
+    for (const msg of messages) {
       try {
-        const eventId = msg.calendarItemId;
-        if (!eventId) {
-          console.log(`Ingen eventId för meddelande: ${msg.subject}`);
-          continue;
-        }
-
         console.log(`Accepterar möte: ${msg.subject}`);
-        const acceptRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/events/${eventId}/accept`, {
+        const acceptRes = await fetch(`https://graph.microsoft.com/v1.0/users/${roomEmail}/messages/${msg.id}/accept`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -75,7 +66,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5️⃣ Hämta alla möten som är idag eller imorgon och inte passerade
+    // 4️⃣ Hämta alla möten som är idag eller imorgon och inte passerade
     const now = DateTime.now().setZone('Europe/Stockholm');
     const todayStartUTC = now.startOf('day').toUTC().toISO();
     const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
