@@ -7,21 +7,16 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Hantera preflight request
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   try {
-    console.log('Börjar köra roomStatus...');
+    console.log('👉 Börjar köra roomStatus...');
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
     const roomEmail = 'motesrumtest@hissen.se';
-
-    console.log('Tenant:', tenantId);
-    console.log('ClientId:', clientId);
-    console.log('ClientSecret satt:', !!clientSecret);
 
     // Hämta access token
     const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -55,12 +50,21 @@ export default async function handler(req, res) {
     let nextMeeting = graphData.value && graphData.value.length > 0 ? graphData.value[0] : null;
 
     if (nextMeeting) {
-      // Ta bort mötesrummet som deltagare
-      nextMeeting.attendees = (nextMeeting.attendees || []).filter(
-        a => a.emailAddress.address.toLowerCase() !== 'motesrumtest@hissen.se'
-      );
-      // Ta bort platsen
-      nextMeeting.location = null;
+      // Filtrera bort Mötesrum Test från attendees
+      nextMeeting.attendees = (nextMeeting.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum Test');
+
+      // Ta bort onlineMeetingUrl så frontend inte visar knappen
+      if (nextMeeting.onlineMeeting) {
+        delete nextMeeting.onlineMeeting;
+      }
+
+      // Konvertera start och end till svensk tid (UTC +2)
+      const start = new Date(nextMeeting.start.dateTime);
+      const end = new Date(nextMeeting.end.dateTime);
+      start.setHours(start.getHours() + 2);
+      end.setHours(end.getHours() + 2);
+      nextMeeting.start.dateTime = start.toISOString();
+      nextMeeting.end.dateTime = end.toISOString();
     }
 
     res.status(200).json({ nextMeeting });
