@@ -1,4 +1,3 @@
-// api/roomStatus.js
 import fetch from 'node-fetch';
 import { DateTime } from 'luxon';
 
@@ -31,34 +30,34 @@ export default async function handler(req, res) {
     if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
     const accessToken = tokenData.access_token;
 
-    // ----- Intervall för idag + imorgon -----
+    // ----- Hämta interval (idag → imorgon slut) -----
     const todayStart = DateTime.now().setZone('Europe/Stockholm').startOf('day').toUTC().toISO();
-    const todayEnd = DateTime.now().setZone('Europe/Stockholm').endOf('day').toUTC().toISO();
-
-    const tomorrowStart = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).startOf('day').toUTC().toISO();
     const tomorrowEnd = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    // ----- Hämta dagens möten -----
-    const fetchMeetings = async (start, end) => {
-      const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${start}&enddatetime=${end}&$orderby=start/dateTime`;
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-      const data = await resp.json();
-      return data.value || [];
-    };
+    const graphUrl =
+      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStart}&enddatetime=${tomorrowEnd}&$orderby=start/dateTime`;
 
-    const todaysMeetings = await fetchMeetings(todayStart, todayEnd);
-    const tomorrowsMeetings = await fetchMeetings(tomorrowStart, tomorrowEnd);
+    const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const graphData = await graphRes.json();
 
-    const meetings = [...todaysMeetings, ...tomorrowsMeetings];
+    const meetings = graphData.value || [];
 
-    // ----- Returnera möten i samma format som tidigare -----
-    const formattedMeetings = meetings.map(m => {
-      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone })
-        .setZone('Europe/Stockholm')
-        .toISO();
-      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone })
-        .setZone('Europe/Stockholm')
-        .toISO();
+    // ----- Filtrera möten i lokalt datum -----
+    const today = DateTime.now().setZone('Europe/Stockholm').toFormat('yyyy-MM-dd');
+    const tomorrow = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).toFormat('yyyy-MM-dd');
+
+    const todaysMeetings = meetings.filter(m =>
+      DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toFormat('yyyy-MM-dd') === today
+    );
+
+    const tomorrowsMeetings = meetings.filter(m =>
+      DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toFormat('yyyy-MM-dd') === tomorrow
+    );
+
+    // ----- Formatera möten -----
+    const formatMeetings = mList => mList.map(m => {
+      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
+      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
 
       return {
         subject: m.subject,
@@ -69,7 +68,11 @@ export default async function handler(req, res) {
       };
     });
 
-    res.status(200).json({ meetings: formattedMeetings });
+    res.status(200).json({
+      today: formatMeetings(todaysMeetings),
+      tomorrow: formatMeetings(tomorrowsMeetings)
+    });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error', details: err.message });
