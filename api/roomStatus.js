@@ -52,7 +52,7 @@ export default async function handler(req, res) {
         subject: m.subject,
         start: { dateTime: startLocal },
         end: { dateTime: endLocal },
-        attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum Test'),
+        attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
         isOnlineMeeting: m.isOnlineMeeting,
       };
     });
