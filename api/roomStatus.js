@@ -1,9 +1,8 @@
 // api/roomStatus.js
 import fetch from 'node-fetch';
-import { DateTime } from 'luxon'; // För tidszonshantering
+import { DateTime } from 'luxon';
 
 export default async function handler(req, res) {
-  // Tillåt alla origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -14,7 +13,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'motesrumtest@hissen.se'; // <-- kontrollera att detta är rätt adress
+    const roomEmail = 'motesrumtest@hissen.se';
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -32,64 +31,25 @@ export default async function handler(req, res) {
     if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
     const accessToken = tokenData.access_token;
 
-    // ----- Hämta möten för idag och imorgon -----
-    const today = DateTime.now().setZone('Europe/Stockholm').startOf('day');
-    const tomorrow = today.plus({ days: 1 }).endOf('day');
+    // ----- Intervall för idag + imorgon -----
+    const todayStart = DateTime.now().setZone('Europe/Stockholm').startOf('day').toUTC().toISO();
+    const todayEnd = DateTime.now().setZone('Europe/Stockholm').endOf('day').toUTC().toISO();
 
-    // Viktigt: Graph kräver UTC i querystring
-    const graphUrl =
-      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?` +
-      `startdatetime=${today.toUTC().toISO()}&enddatetime=${tomorrow.toUTC().toISO()}&$orderby=start/dateTime`;
+    const tomorrowStart = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).startOf('day').toUTC().toISO();
+    const tomorrowEnd = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-    const graphData = await graphRes.json();
+    // ----- Hämta dagens möten -----
+    const fetchMeetings = async (start, end) => {
+      const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${start}&enddatetime=${end}&$orderby=start/dateTime`;
+      const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const data = await resp.json();
+      return data.value || [];
+    };
 
-    if (!graphRes.ok) {
-      return res.status(500).json({ error: 'Graph error', details: graphData });
-    }
+    const todaysMeetings = await fetchMeetings(todayStart, todayEnd);
+    const tomorrowsMeetings = await fetchMeetings(tomorrowStart, tomorrowEnd);
 
-    const meetings = graphData.value || [];
-
-    // ----- Funktion för att acceptera möte -----
-    async function acceptMeeting(eventId) {
-      const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/events/${eventId}/accept`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ sendResponse: true })
-      });
-
-      if (!resp.ok) {
-        const err = await resp.text();
-        console.error(`Kunde inte acceptera mötet (${eventId}):`, err);
-      } else {
-        console.log(`✅ Accepterade möte: ${eventId}`);
-      }
-    }
-
-    // ----- Kolla möten och acceptera om ledigt -----
-    const acceptedMeetings = meetings.filter(m => m.responseStatus?.response === "accepted");
-
-    for (const m of meetings) {
-      if (m.responseStatus?.response === "accepted") continue; // redan accepterat
-
-      const start = DateTime.fromISO(m.start.dateTime);
-      const end = DateTime.fromISO(m.end.dateTime);
-
-      // Kontrollera konflikter
-      const conflict = acceptedMeetings.some(other =>
-        DateTime.fromISO(other.start.dateTime) < end &&
-        DateTime.fromISO(other.end.dateTime) > start
-      );
-
-      if (!conflict) {
-        await acceptMeeting(m.id);
-        acceptedMeetings.push(m);
-      }
-    }
+    const meetings = [...todaysMeetings, ...tomorrowsMeetings];
 
     // ----- Returnera möten i samma format som tidigare -----
     const formattedMeetings = meetings.map(m => {
