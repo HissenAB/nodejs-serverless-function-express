@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     if (nextMeeting) {
       // Filtrera bort Mötesrum Test via name
-      nextMeeting.attendees = (nextMeeting.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum Test');
+      nextMeeting.attendees = (nextMeeting.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test');
 
       // Ta bort onlineMeeting så knappen inte visas
       if (nextMeeting.onlineMeeting) delete nextMeeting.onlineMeeting;
