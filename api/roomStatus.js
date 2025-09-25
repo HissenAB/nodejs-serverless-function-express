@@ -7,9 +7,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     const tenantId = process.env.AZURE_TENANT_ID;
@@ -18,7 +16,7 @@ export default async function handler(req, res) {
     const roomEmail = 'motesrumtest@hissen.se';
 
     // Hämta access token
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -28,35 +26,30 @@ export default async function handler(req, res) {
         grant_type: 'client_credentials'
       })
     });
-    const tokenData = await tokenResponse.json();
-    if (!tokenData.access_token) {
-      return res.status(500).json({ error: 'Failed to get access token', details: tokenData });
-    }
+
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
+
     const accessToken = tokenData.access_token;
 
     const now = new Date().toISOString();
-    const end = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString();
+    const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Hämta upp till 10 kommande möten
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=10`;
-    const graphResponse = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-    const graphData = await graphResponse.json();
-    const meetings = graphData.value || [];
+    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=5`;
+    const graphRes = await fetch(graphUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
 
-    // Pågående möte
-    const currentMeeting = meetings.find(m => new Date(m.start.dateTime) <= new Date() && new Date() <= new Date(m.end.dateTime));
+    const graphData = await graphRes.json();
+    const meetings = (graphData.value || []).map(m => ({
+      subject: m.subject,
+      start: m.start,
+      end: m.end,
+      attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
+      isOnlineMeeting: m.isOnlineMeeting,
+    }));
 
-    // Nästa möte (börjar efter nu)
-    const nextMeeting = meetings.find(m => new Date(m.start.dateTime) > new Date());
-
-    // Filtrera bort "Mötesrum test" som deltagare
-    const filterAttendees = m => {
-      if (!m) return [];
-      return (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test');
-    };
-
-    res.status(200).json({ currentMeeting: currentMeeting ? { ...currentMeeting, attendees: filterAttendees(currentMeeting) } : null,
-                            nextMeeting: nextMeeting ? { ...nextMeeting, attendees: filterAttendees(nextMeeting) } : null });
+    res.status(200).json({ meetings });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error', details: err.message });
