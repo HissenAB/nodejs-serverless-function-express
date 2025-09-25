@@ -7,9 +7,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  // Hantera preflight request
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     console.log('👉 Börjar köra roomStatus...');
@@ -31,9 +30,7 @@ export default async function handler(req, res) {
     });
 
     const tokenData = await tokenResponse.json();
-    if (!tokenData.access_token) {
-      return res.status(500).json({ error: 'Failed to get access token', details: tokenData });
-    }
+    if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get access token', details: tokenData });
 
     const accessToken = tokenData.access_token;
 
@@ -42,29 +39,16 @@ export default async function handler(req, res) {
     const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${now}&enddatetime=${end}&$orderby=start/dateTime&$top=1`;
 
-    const graphResponse = await fetch(graphUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-
+    const graphResponse = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphResponse.json();
     let nextMeeting = graphData.value && graphData.value.length > 0 ? graphData.value[0] : null;
 
     if (nextMeeting) {
-      // Filtrera bort Mötesrum Test från attendees
+      // Filtrera bort Mötesrum Test via name
       nextMeeting.attendees = (nextMeeting.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum Test');
 
-      // Ta bort onlineMeetingUrl så frontend inte visar knappen
-      if (nextMeeting.onlineMeeting) {
-        delete nextMeeting.onlineMeeting;
-      }
-
-      // Konvertera start och end till svensk tid (UTC +2)
-      const start = new Date(nextMeeting.start.dateTime);
-      const end = new Date(nextMeeting.end.dateTime);
-      start.setHours(start.getHours() + 2);
-      end.setHours(end.getHours() + 2);
-      nextMeeting.start.dateTime = start.toISOString();
-      nextMeeting.end.dateTime = end.toISOString();
+      // Ta bort onlineMeeting så knappen inte visas
+      if (nextMeeting.onlineMeeting) delete nextMeeting.onlineMeeting;
     }
 
     res.status(200).json({ nextMeeting });
