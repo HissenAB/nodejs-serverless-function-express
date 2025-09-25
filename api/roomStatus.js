@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'vastberga.mote@hissen.se';
+    const roomEmail = 'motesrumtest@hissen.se'; // <-- kontrollera att detta är rätt adress
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -35,11 +35,20 @@ export default async function handler(req, res) {
     // ----- Hämta möten för idag och imorgon -----
     const today = DateTime.now().setZone('Europe/Stockholm').startOf('day');
     const tomorrow = today.plus({ days: 1 }).endOf('day');
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${today.toISO()}&enddatetime=${tomorrow.toISO()}&$orderby=start/dateTime`;
+
+    // Viktigt: Graph kräver UTC i querystring
+    const graphUrl =
+      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?` +
+      `startdatetime=${today.toUTC().toISO()}&enddatetime=${tomorrow.toUTC().toISO()}&$orderby=start/dateTime`;
 
     const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphRes.json();
-    const meetings = (graphData.value || []);
+
+    if (!graphRes.ok) {
+      return res.status(500).json({ error: 'Graph error', details: graphData });
+    }
+
+    const meetings = graphData.value || [];
 
     // ----- Funktion för att acceptera möte -----
     async function acceptMeeting(eventId) {
@@ -84,8 +93,12 @@ export default async function handler(req, res) {
 
     // ----- Returnera möten i samma format som tidigare -----
     const formattedMeetings = meetings.map(m => {
-      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
-      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
+      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone })
+        .setZone('Europe/Stockholm')
+        .toISO();
+      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone })
+        .setZone('Europe/Stockholm')
+        .toISO();
 
       return {
         subject: m.subject,
