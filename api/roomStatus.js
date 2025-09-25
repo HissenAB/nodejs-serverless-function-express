@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
     const roomEmail = 'vastberga.mote@hissen.se';
 
-    // Hämta token
+    // Hämta access token
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -26,6 +26,7 @@ export default async function handler(req, res) {
         grant_type: 'client_credentials'
       })
     });
+
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) {
       console.error('Failed to get token:', tokenData);
@@ -33,15 +34,14 @@ export default async function handler(req, res) {
     }
     const accessToken = tokenData.access_token;
 
-    // Hämta möten idag + imorgon
-    const todayStart = DateTime.now().setZone('Europe/Stockholm').startOf('day').toUTC().toISO();
-    const tomorrowEnd = DateTime.now().setZone('Europe/Stockholm').plus({ days: 1 }).endOf('day').toUTC().toISO();
+    // Hämta möten för idag + imorgon
+    const now = DateTime.now().setZone('Europe/Stockholm');
+    const todayStartUTC = now.startOf('day').toUTC().toISO();
+    const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStart}&enddatetime=${tomorrowEnd}&$orderby=start/dateTime`;
+    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`;
     const graphRes = await fetch(graphUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const graphData = await graphRes.json();
-
-    console.log('Graph API response:', graphData);
 
     if (!graphRes.ok) {
       console.error('Graph API error:', graphData);
@@ -52,7 +52,7 @@ export default async function handler(req, res) {
     console.log(`Hämtade möten: ${meetings.length}`);
 
     // Funktion för att acceptera möte
-    async function acceptMeeting(eventId) {
+    async function acceptMeeting(eventId, subject) {
       const url = `https://graph.microsoft.com/v1.0/users/${roomEmail}/events/${eventId}/accept`;
       const resp = await fetch(url, {
         method: 'POST',
@@ -65,51 +65,54 @@ export default async function handler(req, res) {
 
       if (!resp.ok) {
         const err = await resp.text();
-        console.error(`❌ Kunde inte acceptera mötet (${eventId}):`, err);
+        console.error(`❌ Kunde inte acceptera mötet (${subject}):`, err);
       } else {
-        console.log(`✅ Accepterade möte: ${eventId}`);
+        console.log(`✅ Accepterade möte: ${subject}`);
       }
     }
 
+    // Lista över accepterade möten för att kolla konflikter
     const acceptedMeetings = meetings.filter(m => m.responseStatus?.response === "accepted");
 
     for (const m of meetings) {
-      console.log('Möte:', m.subject, 'status:', m.responseStatus?.response);
-      if (m.responseStatus?.response === "accepted") continue;
+      const start = DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm');
+      const end = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
 
-      const start = DateTime.fromISO(m.start.dateTime);
-      const end = DateTime.fromISO(m.end.dateTime);
+      if (m.responseStatus?.response === "accepted") {
+        console.log(`Möte redan accepterat: ${m.subject}`);
+        continue;
+      }
 
-      const conflict = acceptedMeetings.some(other =>
-        DateTime.fromISO(other.start.dateTime) < end &&
-        DateTime.fromISO(other.end.dateTime) > start
-      );
+      // Kolla krockar med redan accepterade möten
+      const conflict = acceptedMeetings.some(other => {
+        const otherStart = DateTime.fromISO(other.start.dateTime).setZone('Europe/Stockholm');
+        const otherEnd = DateTime.fromISO(other.end.dateTime).setZone('Europe/Stockholm');
+        return start < otherEnd && end > otherStart;
+      });
 
       if (!conflict) {
-        console.log(`Försöker acceptera möte: ${m.subject} (${m.id})`);
-        await acceptMeeting(m.id);
+        console.log(`Försöker acceptera möte: ${m.subject}`);
+        await acceptMeeting(m.id, m.subject);
         acceptedMeetings.push(m);
       } else {
         console.log(`Krock med annat möte, accepterar inte: ${m.subject}`);
       }
     }
 
-    const now = DateTime.now().setZone('Europe/Stockholm');
+    // Filtrera bort möten som redan är passerade idag
     const upcomingMeetings = meetings.filter(m => {
-      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm');
+      const endLocal = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
       return endLocal >= now;
     });
 
+    // Formatera möten
     const formattedMeetings = upcomingMeetings.map(m => {
-      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
-      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
-
       return {
         subject: m.subject,
-        start: { dateTime: startLocal },
-        end: { dateTime: endLocal },
+        start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm').toISO() },
+        end: { dateTime: DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm').toISO() },
         attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
-        isOnlineMeeting: m.isOnlineMeeting,
+        isOnlineMeeting: m.isOnlineMeeting
       };
     });
 
