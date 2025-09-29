@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'motesrumtest@hissen.se';
+    const roomEmail = 'vastberga.mote@hissen.se';
 
     // Hämta access token
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
