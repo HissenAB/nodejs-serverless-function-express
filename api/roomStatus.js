@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const tenantId = process.env.AZURE_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID;
     const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'vastberga.mote@hissen.se';
+    const roomEmail = 'motesrumtest@hissen.se';
 
     // ----- Hämta access token -----
     const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -51,3 +51,30 @@ export default async function handler(req, res) {
     );
 
     const tomorrowsMeetings = meetings.filter(m =>
+      DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toFormat('yyyy-MM-dd') === tomorrow
+    );
+
+    // ----- Formatera möten -----
+    const formatMeetings = mList => mList.map(m => {
+      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
+      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
+
+      return {
+        subject: m.subject,
+        start: { dateTime: startLocal },
+        end: { dateTime: endLocal },
+        attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
+        isOnlineMeeting: m.isOnlineMeeting,
+      };
+    });
+
+    res.status(200).json({
+      today: formatMeetings(todaysMeetings),
+      tomorrow: formatMeetings(tomorrowsMeetings)
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+}
