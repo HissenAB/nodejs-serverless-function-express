@@ -1,65 +1,71 @@
-// api/roomStatus.js
 import fetch from 'node-fetch';
 import { DateTime } from 'luxon';
 
+const CLIENT_ID = process.env.AZURE_CLIENT_ID;
+const TENANT_ID = process.env.AZURE_TENANT_ID;
+const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
+const REFRESH_TOKEN = process.env.AZURE_REFRESH_TOKEN; // Refresh token från användaren
+const ROOM_EMAIL = 'vastberga.mote@hissen.se';
+
+async function getAccessToken() {
+  // Byt refresh token mot nytt access token
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    scope: 'https://graph.microsoft.com/.default offline_access',
+    grant_type: 'refresh_token',
+    refresh_token: REFRESH_TOKEN,
+    client_secret: CLIENT_SECRET
+  });
+
+  const res = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params
+  });
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error('Could not get access token: ' + JSON.stringify(data));
+  return data.access_token;
+}
+
 export default async function handler(req, res) {
-  // Tillåt alla origins
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const tenantId = process.env.AZURE_TENANT_ID;
-    const clientId = process.env.AZURE_CLIENT_ID;
-    const clientSecret = process.env.AZURE_CLIENT_SECRET;
-    const roomEmail = 'vastberga.mote@hissen.se';
+    const accessToken = await getAccessToken();
 
-    // Hämta access token
-    const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        scope: 'https://graph.microsoft.com/.default',
-        client_secret: clientSecret,
-        grant_type: 'client_credentials'
-      })
-    });
-
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return res.status(500).json({ error: 'Failed to get token', details: tokenData });
-
-    const accessToken = tokenData.access_token;
-
-    // Beräkna start och slut för kalenderhämtningsintervallet
+    // Hämta kalender för idag + imorgon
     const now = DateTime.now().setZone('Europe/Stockholm');
-    const startOfToday = now.startOf('day').toISO();
-    const endOfTomorrow = now.plus({ days: 1 }).endOf('day').toISO();
+    const todayStartUTC = now.startOf('day').toUTC().toISO();
+    const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    const graphUrl = `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${startOfToday}&enddatetime=${endOfTomorrow}&$orderby=start/dateTime`;
+    const calendarRes = await fetch(
+      `https://graph.microsoft.com/v1.0/me/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
 
-    const graphRes = await fetch(graphUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+    const calendarData = await calendarRes.json();
+    const meetings = calendarData.value || [];
+
+    // Filtrera bort passerade möten
+    const upcomingMeetings = meetings.filter(m => {
+      const endLocal = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
+      return endLocal >= now;
     });
 
-    const graphData = await graphRes.json();
+    // Formatera möten för front-end
+    const formatted = upcomingMeetings.map(m => ({
+      subject: m.subject,
+      start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm').toISO() },
+      end: { dateTime: DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm').toISO() },
+      attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
+      isOnlineMeeting: m.isOnlineMeeting
+    }));
 
-    const meetings = (graphData.value || []).map(m => {
-      const startLocal = DateTime.fromISO(m.start.dateTime, { zone: m.start.timeZone }).setZone('Europe/Stockholm').toISO();
-      const endLocal = DateTime.fromISO(m.end.dateTime, { zone: m.end.timeZone }).setZone('Europe/Stockholm').toISO();
-
-      return {
-        subject: m.subject,
-        start: { dateTime: startLocal },
-        end: { dateTime: endLocal },
-        attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
-        isOnlineMeeting: m.isOnlineMeeting,
-      };
-    });
-
-    res.status(200).json({ meetings });
+    res.status(200).json({ meetings: formatted });
 
   } catch (err) {
     console.error(err);
