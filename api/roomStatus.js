@@ -1,10 +1,9 @@
 // roomStatus.js
 
-async function getRoomStatus(roomEmail) {
+async function fetchRoomData(roomEmail) {
     try {
-        const res = await fetch(
-            `https://nodejs-serverless-function-express-beta-dusky.vercel.app/api/roomStatus?room=${encodeURIComponent(roomEmail)}`
-        );
+        const res = await fetch(`https://VERCEL_APP_URL.vercel.app/api/roomStatus?room=${encodeURIComponent(roomEmail)}`);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return await res.json();
     } catch (err) {
         console.error("Fel vid hämtning av möten:", err);
@@ -21,32 +20,28 @@ async function updateStatus() {
     const tomorrowEl = document.getElementById("tomorrowMeetings");
     const headerEl = document.querySelector("header");
 
-    // Ändra rubriken beroende på rummet
-    if (roomEmail.includes("mote1")) {
-        headerEl.textContent = "Mötesrum – Västberga 1";
-    } else if (roomEmail.includes("mote2")) {
-        headerEl.textContent = "Mötesrum – Västberga 2";
-    }
+    // Rubrik beroende på rum
+    headerEl.textContent =
+        roomEmail.includes("mote1") ? "Mötesrum – Västberga 1" : "Mötesrum – Västberga 2";
 
     try {
-        const data = await getRoomStatus(roomEmail);
+        const data = await fetchRoomData(roomEmail);
         const now = new Date();
         const meetings = data.meetings || [];
 
-        // Nuvarande möte
+        // Pågående möte
         const ongoing = meetings.find(
             m => new Date(m.start.dateTime) <= now && now <= new Date(m.end.dateTime)
         );
         statusEl.textContent = ongoing ? "Upptaget" : "Ledigt";
         statusEl.className = "status " + (ongoing ? "upptaget" : "ledigt");
 
-        // Idag
+        // Dela upp i idag och imorgon
         const todayMeetingsArr = meetings.filter(m => {
             const start = new Date(m.start.dateTime);
             return start.toDateString() === now.toDateString() && start > now;
         });
 
-        // Imorgon
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowMeetingsArr = meetings.filter(m => {
@@ -63,15 +58,10 @@ async function updateStatus() {
                 <div class="meeting-time">Pågående: ${new Date(
                     ongoing.start.dateTime
                 ).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} - 
-                ${new Date(ongoing.end.dateTime).toLocaleTimeString("sv-SE", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                })}</div>
+                ${new Date(ongoing.end.dateTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</div>
                 <div>${ongoing.subject}</div>
+                <div class="attendees">Bokad av: ${ongoing.organizer?.emailAddress?.name || "Okänd"}</div>
             `;
-            if (ongoing.organizer && ongoing.organizer.emailAddress) {
-                div.innerHTML += `<div class="attendees">Bokad av: ${ongoing.organizer.emailAddress.name}</div>`;
-            }
             todayEl.appendChild(div);
         }
 
@@ -79,19 +69,11 @@ async function updateStatus() {
             const div = document.createElement("div");
             div.className = "meeting-card";
             div.innerHTML = `
-                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString(
-                    "sv-SE",
-                    { hour: "2-digit", minute: "2-digit" }
-                )} - 
-                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                })}</div>
+                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} - 
+                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</div>
                 <div>${m.subject}</div>
+                <div class="attendees">Bokad av: ${m.organizer?.emailAddress?.name || "Okänd"}</div>
             `;
-            if (m.organizer && m.organizer.emailAddress) {
-                div.innerHTML += `<div class="attendees">Bokad av: ${m.organizer.emailAddress.name}</div>`;
-            }
             todayEl.appendChild(div);
         });
 
@@ -101,19 +83,11 @@ async function updateStatus() {
             const div = document.createElement("div");
             div.className = "meeting-card";
             div.innerHTML = `
-                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString(
-                    "sv-SE",
-                    { hour: "2-digit", minute: "2-digit" }
-                )} - 
-                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                })}</div>
+                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} - 
+                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}</div>
                 <div>${m.subject}</div>
+                <div class="attendees">Bokad av: ${m.organizer?.emailAddress?.name || "Okänd"}</div>
             `;
-            if (m.organizer && m.organizer.emailAddress) {
-                div.innerHTML += `<div class="attendees">Bokad av: ${m.organizer.emailAddress.name}</div>`;
-            }
             tomorrowEl.appendChild(div);
         });
     } catch (err) {
@@ -124,5 +98,6 @@ async function updateStatus() {
     }
 }
 
+// Starta uppdatering direkt + varje minut
 updateStatus();
 setInterval(updateStatus, 60000);
