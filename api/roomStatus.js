@@ -1,46 +1,41 @@
-import fetch from 'node-fetch';
-import { DateTime } from 'luxon';
-
-const CLIENT_ID = process.env.AZURE_CLIENT_ID;
-const TENANT_ID = process.env.AZURE_TENANT_ID;
-const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
-const ROOM_EMAIL = 'vastberga.mote@hissen.se';
+import { DateTime } from "luxon";
 
 async function getAccessToken() {
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID,
-    scope: 'https://graph.microsoft.com/.default',
-    client_secret: CLIENT_SECRET,
-    grant_type: 'client_credentials'
-  });
-
-  const res = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params
+  const res = await fetch("https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.CLIENT_ID,
+      client_secret: process.env.CLIENT_SECRET,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    }),
   });
 
   const data = await res.json();
-  if (!data.access_token) throw new Error('Could not get access token: ' + JSON.stringify(data));
   return data.access_token;
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
+    const { room } = req.query;
+    if (!room || !["vastberga.mote1@hissen.se", "vastberga.mote2@hissen.se"].includes(room)) {
+      return res.status(400).json({ error: "Invalid room. Use vastberga.mote1@hissen.se or vastberga.mote2@hissen.se" });
+    }
+
     const accessToken = await getAccessToken();
 
-    const now = DateTime.now().setZone('Europe/Stockholm');
-    const todayStartUTC = now.startOf('day').toUTC().toISO();
-    const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
+    const now = DateTime.now().setZone("Europe/Stockholm");
+    const todayStartUTC = now.startOf("day").toUTC().toISO();
+    const tomorrowEndUTC = now.plus({ days: 1 }).endOf("day").toUTC().toISO();
 
-    // Hämta möten för idag och imorgon
     const calendarRes = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${ROOM_EMAIL}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
+      `https://graph.microsoft.com/v1.0/users/${room}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
@@ -48,21 +43,21 @@ export default async function handler(req, res) {
     const meetings = calendarData.value || [];
 
     const upcomingMeetings = meetings.filter(m => {
-      const endLocal = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
+      const endLocal = DateTime.fromISO(m.end.dateTime).setZone("Europe/Stockholm");
       return endLocal >= now;
     });
 
     const formatted = upcomingMeetings.map(m => ({
-      subject: m.subject,
-      start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm').toISO() },
-      end: { dateTime: DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm').toISO() },
-      attendees: (m.attendees || []).filter(a => a.emailAddress.name !== 'Mötesrum test'),
+      subject: m.subject || "Bokat möte",
+      start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone("Europe/Stockholm").toISO() },
+      end: { dateTime: DateTime.fromISO(m.end.dateTime).setZone("Europe/Stockholm").toISO() },
+      organizer: m.organizer?.emailAddress?.name || "Okänd bokare",
       isOnlineMeeting: m.isOnlineMeeting
     }));
 
     res.status(200).json({ meetings: formatted });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Server error', details: err.message });
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 }
