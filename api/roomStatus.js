@@ -1,63 +1,128 @@
-import { DateTime } from "luxon";
+// roomStatus.js
 
-async function getAccessToken() {
-  const res = await fetch("https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-  });
-
-  const data = await res.json();
-  return data.access_token;
+async function getRoomStatus(roomEmail) {
+    try {
+        const res = await fetch(
+            `https://nodejs-serverless-function-express-beta-dusky.vercel.app/api/roomStatus?room=${encodeURIComponent(roomEmail)}`
+        );
+        return await res.json();
+    } catch (err) {
+        console.error("Fel vid hämtning av möten:", err);
+        return { meetings: [] };
+    }
 }
 
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
+async function updateStatus() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomEmail = urlParams.get("room") || "vastberga.mote1@hissen.se"; // default
 
-  try {
-    const { room } = req.query;
-    if (!room || !["vastberga.mote1@hissen.se", "vastberga.mote2@hissen.se"].includes(room)) {
-      return res.status(400).json({ error: "Invalid room. Use vastberga.mote1@hissen.se or vastberga.mote2@hissen.se" });
+    const statusEl = document.getElementById("status");
+    const todayEl = document.getElementById("todayMeetings");
+    const tomorrowEl = document.getElementById("tomorrowMeetings");
+    const headerEl = document.querySelector("header");
+
+    // Ändra rubriken beroende på rummet
+    if (roomEmail.includes("mote1")) {
+        headerEl.textContent = "Mötesrum – Västberga 1";
+    } else if (roomEmail.includes("mote2")) {
+        headerEl.textContent = "Mötesrum – Västberga 2";
     }
 
-    const accessToken = await getAccessToken();
+    try {
+        const data = await getRoomStatus(roomEmail);
+        const now = new Date();
+        const meetings = data.meetings || [];
 
-    const now = DateTime.now().setZone("Europe/Stockholm");
-    const todayStartUTC = now.startOf("day").toUTC().toISO();
-    const tomorrowEndUTC = now.plus({ days: 1 }).endOf("day").toUTC().toISO();
+        // Nuvarande möte
+        const ongoing = meetings.find(
+            m => new Date(m.start.dateTime) <= now && now <= new Date(m.end.dateTime)
+        );
+        statusEl.textContent = ongoing ? "Upptaget" : "Ledigt";
+        statusEl.className = "status " + (ongoing ? "upptaget" : "ledigt");
 
-    const calendarRes = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${room}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+        // Idag
+        const todayMeetingsArr = meetings.filter(m => {
+            const start = new Date(m.start.dateTime);
+            return start.toDateString() === now.toDateString() && start > now;
+        });
 
-    const calendarData = await calendarRes.json();
-    const meetings = calendarData.value || [];
+        // Imorgon
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowMeetingsArr = meetings.filter(m => {
+            const start = new Date(m.start.dateTime);
+            return start.toDateString() === tomorrow.toDateString();
+        });
 
-    const upcomingMeetings = meetings.filter(m => {
-      const endLocal = DateTime.fromISO(m.end.dateTime).setZone("Europe/Stockholm");
-      return endLocal >= now;
-    });
+        // Rendera idag
+        todayEl.innerHTML = "";
+        if (ongoing) {
+            const div = document.createElement("div");
+            div.className = "meeting-card ongoing";
+            div.innerHTML = `
+                <div class="meeting-time">Pågående: ${new Date(
+                    ongoing.start.dateTime
+                ).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} - 
+                ${new Date(ongoing.end.dateTime).toLocaleTimeString("sv-SE", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })}</div>
+                <div>${ongoing.subject}</div>
+            `;
+            if (ongoing.organizer && ongoing.organizer.emailAddress) {
+                div.innerHTML += `<div class="attendees">Bokad av: ${ongoing.organizer.emailAddress.name}</div>`;
+            }
+            todayEl.appendChild(div);
+        }
 
-    const formatted = upcomingMeetings.map(m => ({
-      subject: m.subject || "Bokat möte",
-      start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone("Europe/Stockholm").toISO() },
-      end: { dateTime: DateTime.fromISO(m.end.dateTime).setZone("Europe/Stockholm").toISO() },
-      organizer: m.organizer?.emailAddress?.name || "Okänd bokare",
-      isOnlineMeeting: m.isOnlineMeeting
-    }));
+        todayMeetingsArr.forEach(m => {
+            const div = document.createElement("div");
+            div.className = "meeting-card";
+            div.innerHTML = `
+                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString(
+                    "sv-SE",
+                    { hour: "2-digit", minute: "2-digit" }
+                )} - 
+                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })}</div>
+                <div>${m.subject}</div>
+            `;
+            if (m.organizer && m.organizer.emailAddress) {
+                div.innerHTML += `<div class="attendees">Bokad av: ${m.organizer.emailAddress.name}</div>`;
+            }
+            todayEl.appendChild(div);
+        });
 
-    res.status(200).json({ meetings: formatted });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error", details: err.message });
-  }
+        // Rendera imorgon
+        tomorrowEl.innerHTML = "";
+        tomorrowMeetingsArr.forEach(m => {
+            const div = document.createElement("div");
+            div.className = "meeting-card";
+            div.innerHTML = `
+                <div class="meeting-time">${new Date(m.start.dateTime).toLocaleTimeString(
+                    "sv-SE",
+                    { hour: "2-digit", minute: "2-digit" }
+                )} - 
+                ${new Date(m.end.dateTime).toLocaleTimeString("sv-SE", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                })}</div>
+                <div>${m.subject}</div>
+            `;
+            if (m.organizer && m.organizer.emailAddress) {
+                div.innerHTML += `<div class="attendees">Bokad av: ${m.organizer.emailAddress.name}</div>`;
+            }
+            tomorrowEl.appendChild(div);
+        });
+    } catch (err) {
+        console.error("Fel vid renderingen:", err);
+        statusEl.textContent = "Fel vid laddning";
+        todayEl.innerHTML = "";
+        tomorrowEl.innerHTML = "";
+    }
 }
+
+updateStatus();
+setInterval(updateStatus, 60000);
