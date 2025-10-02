@@ -7,9 +7,9 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
 // Lista med tillåtna rum och deras displaynamn
 const allowedRooms = {
-  "vastberga.mote1@hissen.se": "Mötesrum 1 – Västberga",
-  "vastberga.mote2@hissen.se": "Mötesrum 2 – Västberga",
-  "storakonferensrummet@hissen.se": "Stora konferensrummet – Västberga"
+  "vastberga.mote1@hissen.se": "Mötesrum 1 - Västberga",
+  "vastberga.mote2@hissen.se": "Mötesrum 2 - Västberga",
+  "storakonferensrummet@hissen.se": "Stora konferensrummet"
 };
 
 // Hämta access token från Microsoft Graph
