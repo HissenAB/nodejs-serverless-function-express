@@ -5,12 +5,12 @@ const CLIENT_ID = process.env.AZURE_CLIENT_ID;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
-// Lista över tillåtna rum
-const ALLOWED_ROOMS = [
-  'vastberga.mote1@hissen.se',
-  'vastberga.mote2@hissen.se',
-  'storakonferensrummet@hissen.se'
-];
+// Lista med tillåtna rum och deras displaynamn
+const allowedRooms = {
+  "vastberga.mote1@hissen.se": "Mötesrum 1 – Västberga",
+  "vastberga.mote2@hissen.se": "Mötesrum 2 – Västberga",
+  "storakonferensrummet@hissen.se": "Stora konferensrummet – Västberga"
+};
 
 // Hämta access token från Microsoft Graph
 async function getAccessToken() {
@@ -39,19 +39,20 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  const roomEmail = req.query.room;
+
+  // Kontrollera om rummet är tillåtet
+  if (!roomEmail || !allowedRooms[roomEmail]) {
+    return res.status(403).json({ error: "Rummet är inte tillåtet", displayName: roomEmail });
+  }
+
   try {
-    const roomEmail = req.query.room;
-
-    if (!roomEmail || !ALLOWED_ROOMS.includes(roomEmail.toLowerCase())) {
-      return res.status(403).json({ error: true, message: `Rummet ${roomEmail || 'okänt'} är inte tillåtet` });
-    }
-
     const accessToken = await getAccessToken();
-
     const now = DateTime.now().setZone('Europe/Stockholm');
     const todayStartUTC = now.startOf('day').toUTC().toISO();
     const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
 
+    // Hämta möten för idag + imorgon
     const calendarRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -73,10 +74,10 @@ export default async function handler(req, res) {
       isOnlineMeeting: m.isOnlineMeeting
     }));
 
-    res.status(200).json({ error: false, meetings: formatted });
+    res.status(200).json({ meetings: formatted, displayName: allowedRooms[roomEmail] });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: true, message: 'Server error', details: err.message });
+    res.status(500).json({ error: 'Server error', details: err.message, displayName: allowedRooms[roomEmail] });
   }
 }
