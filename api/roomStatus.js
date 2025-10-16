@@ -5,14 +5,14 @@ const CLIENT_ID = process.env.AZURE_CLIENT_ID;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
-// Lista med tillåtna rum och deras displaynamn
+// rumsmejl och namn
 const allowedRooms = {
   "vastberga.mote1@hissen.se": "Mötesrum 1 - Västberga",
   "vastberga.mote2@hissen.se": "Mötesrum 2 - Västberga",
   "storakonferensrummet@hissen.se": "Stora konferensrummet"
 };
 
-// Hämta access token från Microsoft Graph
+// Access token från Microsoft GraphAPI
 async function getAccessToken() {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -32,7 +32,6 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-// API handler för Vercel
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
@@ -41,7 +40,7 @@ export default async function handler(req, res) {
 
   const roomEmail = req.query.room;
 
-  // Kontrollera om rummet är tillåtet
+  // ifall mejlen inte är på listan
   if (!roomEmail || !allowedRooms[roomEmail]) {
     return res.status(403).json({ error: "Rummet är inte tillåtet", displayName: roomEmail });
   }
@@ -52,7 +51,7 @@ export default async function handler(req, res) {
     const todayStartUTC = now.startOf('day').toUTC().toISO();
     const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
 
-    // Hämta möten för idag + imorgon
+    // möten för idag + imorgon
     const calendarRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
