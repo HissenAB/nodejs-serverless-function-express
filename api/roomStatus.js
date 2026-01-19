@@ -5,7 +5,7 @@ const CLIENT_ID = process.env.AZURE_CLIENT_ID;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
-// rumsmejl och namn
+// Rumsmejl och visningsnamn
 const allowedRooms = {
   "vastberga.mote1@hissen.se": "Mötesrum 1 - Västberga",
   "vastberga.mote2@hissen.se": "Mötesrum 2 - Västberga",
@@ -13,7 +13,7 @@ const allowedRooms = {
   "vastberga.mote3@hissen.se": "Mötesrum 3 - Västberga",
 };
 
-// Access token från Microsoft GraphAPI
+// Access token från Microsoft Graph API
 async function getAccessToken() {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -41,7 +41,6 @@ export default async function handler(req, res) {
 
   const roomEmail = req.query.room;
 
-  // ifall mejlen inte är på listan
   if (!roomEmail || !allowedRooms[roomEmail]) {
     return res.status(403).json({ error: "Rummet är inte tillåtet", displayName: roomEmail });
   }
@@ -50,22 +49,24 @@ export default async function handler(req, res) {
     const accessToken = await getAccessToken();
     const now = DateTime.now().setZone('Europe/Stockholm');
     const todayStartUTC = now.startOf('day').toUTC().toISO();
-    const tomorrowEndUTC = now.plus({ days: 1 }).endOf('day').toUTC().toISO();
+    const weekEndUTC = now.plus({ days: 7 }).endOf('day').toUTC().toISO(); // ändring här: 7 dagar framåt
 
-    // möten för idag + imorgon
+    // Hämta möten för kommande 7 dagar
     const calendarRes = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${tomorrowEndUTC}&$orderby=start/dateTime`,
+      `https://graph.microsoft.com/v1.0/users/${roomEmail}/calendarview?startdatetime=${todayStartUTC}&enddatetime=${weekEndUTC}&$orderby=start/dateTime`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
     const calendarData = await calendarRes.json();
     const meetings = calendarData.value || [];
 
+    // Filtrera bort möten som redan är slut
     const upcomingMeetings = meetings.filter(m => {
       const endLocal = DateTime.fromISO(m.end.dateTime).setZone('Europe/Stockholm');
       return endLocal >= now;
     });
 
+    // Formatera möten
     const formatted = upcomingMeetings.map(m => ({
       subject: m.subject,
       start: { dateTime: DateTime.fromISO(m.start.dateTime).setZone('Europe/Stockholm').toISO() },
