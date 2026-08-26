@@ -7,10 +7,10 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
 // Rumsmejl och visningsnamn
 const allowedRooms = {
-  "vastberga.mote1@hissen.se": "Mötesrum 1 - Västberga",
-  "vastberga.mote2@hissen.se": "Mötesrum 2 - Västberga",
+  "kajen@hissen.se": "Kajen - Västberga",
+  "stadshuset@hissen.se": "Stadshuset - Västberga",
   "storakonferensrummet@hissen.se": "Stora konferensrummet",
-  "vastberga.mote3@hissen.se": "Mötesrum 3 - Västberga",
+  "centralen@hissen.se": "Centralen - Västberga",
 };
 
 // Cache: { [roomEmail]: { timestamp: Date, data: object } }
