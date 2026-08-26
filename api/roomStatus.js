@@ -7,7 +7,7 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 
 // Rumsmejl och visningsnamn
 const allowedRooms = {
-  "kajen@hissen.se": "Kajen - Västberga",
+  "riksdagen@hissen.se": "Riksdagen - Västberga",
   "stadshuset@hissen.se": "Stadshuset - Västberga",
   "storakonferensrummet@hissen.se": "Stora konferensrummet",
   "centralen@hissen.se": "Centralen - Västberga",
